@@ -1,0 +1,470 @@
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+
+#define BASE_MOTOR 0
+#define LEFT_SHOULDER_MOTOR 2
+#define RIGHT_SHOULDER_MOTOR 4
+#define ELBOW_MOTOR 6
+#define CLAW_WRIST 8
+#define CLAW_MOTOR 10
+
+#define SERVO_MIN  150  
+#define SERVO_MAX  600  
+
+// booleans for capture, and castle logic
+bool isCapture = false;
+bool isQueenSideCastle = false;
+bool isKingSideCastle = false;
+
+// values to keep for saving angles in between moves
+int lastRow = -1;
+int lastColumn = -1;
+
+// values to keep for saving angles to return to home position
+int lastRow2 = -2;
+int lastColumn2 = -2;
+
+/** Zeroing values **/
+int baseMotor = 0;
+int leftShoulderMotor = 10;  
+int rightShoulderMotor = 155;  
+int elbowMotor = 0;
+int clawWristMotor = 0;
+int clawMotor = 110;
+
+/** Home Positions **/
+int homeBaseMotor = 0;
+int homeLeftShoulderMotor = 90;
+int homeRightShoulderMotor = 75;
+int homeElbowMotor = 100;
+int homeClawWristMotor = 10;
+int homeClawMotor = 105;
+
+
+// function to move the servos
+void moveServoIncremental(int servoChannel, int currentAngle, int targetAngle) {
+
+    // targetAngle = round(targetAngle / 5.0) * 5;  // Round to nearest 5 degrees
+    targetAngle = round(targetAngle);
+    if (currentAngle < targetAngle) {
+        for (int angle = currentAngle; angle <= targetAngle; angle += 1) {
+            pwm.setPWM(servoChannel, 0, map(angle, 0, 180, SERVO_MIN, SERVO_MAX));
+            delay(50);
+        }
+    } else {
+
+        for (int angle = currentAngle; angle >= targetAngle; angle -= 1) {
+            pwm.setPWM(servoChannel, 0, map(angle, 0, 180, SERVO_MIN, SERVO_MAX));
+            delay(50);
+        }
+    }
+}
+
+// Chessboard target angles
+int chessBoard[8][8][6] = { 
+
+    //increasing wrist makes it come closer to the base
+    //decreasing elbow makes it go up away from the base
+    //left shoulder down, right shoulder up, elbow up, wrist down
+    // a8 -> h8
+    //a8 is good                     //b8 is good                  //c8 is good                   //d8 is good                   //e8 is good                   //f8 is good                    //g8 is good                    //h8 is good
+    { { 41, 119, 46, 109, 75, 150}, { 51, 120, 45, 110, 81, 150}, { 62, 116, 49, 108, 90, 150 }, { 79, 135, 30, 116, 89, 150 }, { 92, 128, 37, 110, 92, 150 }, { 105, 122, 43, 108, 88, 150 }, { 117, 116, 49, 105, 86, 150 }, { 125, 118, 47, 108, 74, 150 } },
+    // a7 -> h7
+    //a7 is good                     //b7 is good                  //c7 is good                   //d7 is good                   //e7 is good                   //f7 is good                    //g7 is good                    //h7 is good
+    { { 46, 116, 49, 108, 66, 150}, { 56, 118, 47, 108, 72, 150}, { 64, 117, 48, 108, 79, 150 }, { 75, 121, 45, 106, 85, 150 }, { 88, 119, 47, 106, 82, 150 }, { 100, 120, 45, 107, 81, 150 }, { 109, 118, 47, 106, 76, 150 }, { 117, 116, 49, 109, 65, 150 } },
+    // a6 -> h6
+    //a6 is good                     //b6 is good                 //c6 is good                  //d6 is good                   //e6 is good                    //f6 is good                  //g6 is good                   //h6 is good
+    { { 50, 110, 65, 99, 65, 150}, { 59, 100, 65, 95, 74, 150}, { 68, 100, 65, 95, 77, 150 }, { 75, 116, 49, 105, 73, 150 }, { 86, 119, 46, 109, 69, 150 }, { 96, 114, 55, 105, 70, 150 }, { 104, 107, 58, 99, 70, 150 }, { 111, 112, 53, 105, 60, 150 } },
+    // a5 -> h5
+    //a5 is good                   //b5 is good                //c5 is good                 //d5 is good                   //e5 is good                  //f5 is good                 //g5 is good                  //h5 is good                           
+    { { 60, 85, 80, 79, 71, 150}, { 64, 90, 75, 85, 70, 150}, { 68, 98, 83, 84, 78, 150 }, { 78, 113, 52, 108, 57, 150 }, { 87, 100, 65, 95, 70, 150 }, { 95, 98, 67, 93, 70, 150 }, { 101, 94, 71, 90, 66, 150 }, { 109, 103, 62, 100, 54, 150 } },
+    // a4 -> h4
+    //a4 is good                   //b4 is good                //c4 is good                 //d4 is good                 //e4 is good                 //f4 is good                 //g4 is good                 //h4 is good
+    { { 59, 75, 90, 65, 80, 150}, { 64, 75, 90, 65, 85, 150}, { 70, 78, 87, 70, 80, 150 }, { 78, 85, 80, 81, 72, 150 }, { 84, 82, 83, 74, 78, 150 }, { 89, 80, 85, 72, 79, 150 }, { 94, 75, 90, 64, 83, 150 }, { 100, 74, 91, 63, 80, 150 } },
+    // a3 -> h3
+    //a3 is good                   //b3 is good                //c3 is good                 //d3 is good                 //e3 is good                 //f3 is good                 //g3 is good                 //h3 is good
+    { { 60, 70, 95, 65, 70, 150}, { 68, 67, 88, 65, 72, 150}, { 71, 70, 95, 58, 81, 150 }, { 78, 69, 94, 56, 84, 150 }, { 80, 68, 97, 53, 86, 150 }, { 87, 72, 93, 62, 75, 150 }, { 95, 69, 96, 55, 80, 150 }, { 100, 67, 98, 53, 78, 150 } },
+    // a2 -> h2
+    //a2 is good                    //b2 is good                //c2 is good                 //d2 is good                 //e2 is good                  //f2 is good                 //g2 is good                  //h2 is good
+    { { 64, 65, 100, 55, 62, 150}, { 67, 68, 97, 60, 65, 150}, { 73, 72, 93, 62, 70, 150 }, { 77, 66, 99, 55, 74, 150 }, { 82, 65, 100, 52, 75, 150 }, { 89, 67, 98, 54, 73, 150 }, { 95, 64, 101, 47, 78, 150 }, { 100, 60, 105, 42, 78, 150 } },
+    // a1 -> h1
+    //a1 is good                    //b1 is good                 //c1 is good                  //d1 is good                  //e1 is good                  //f1 is good                  //g1 is good                  //h1 is good
+    { { 65, 60, 105, 47, 60, 150}, { 69, 65, 100, 54, 59, 150}, { 73, 60, 105, 42, 72, 150 }, { 78, 57, 108, 35, 76, 150 }, { 81, 60, 105, 44, 72, 150 }, { 87, 61, 104, 45, 70, 150 }, { 93, 59, 106, 45, 68, 150 }, { 97, 58, 107, 40, 67, 150 } },
+    
+};
+
+// move to destination square first to take the piece
+void takePiece(char file2, int rank2) {
+
+    int column = file2 - 'a';
+    int row = 8 - rank2;
+
+    if (column < 0 || column > 7 || row < 0 || row > 7) {
+        Serial.println("Invalid square.");
+        return;
+    }
+
+    Serial.print("Moving to take: "); Serial.print(file2); Serial.println(rank2);
+    
+    //moveServoIncremental(LEFT_SHOULDER_MOTOR, homeLeftShoulderMotor, chessBoard[row][column][1]);
+    //moveServoIncremental(RIGHT_SHOULDER_MOTOR, homeRightShoulderMotor, chessBoard[row][column][2]);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, homeLeftShoulderMotor, 115);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, homeRightShoulderMotor, 50);
+    delay(150);
+    //moveServoIncremental(ELBOW_MOTOR, homeElbowMotor, chessBoard[row][column][3]);
+    moveServoIncremental(ELBOW_MOTOR, homeElbowMotor, 40);
+    delay(150);
+    moveServoIncremental(CLAW_WRIST, homeClawWristMotor, chessBoard[row][column][4]);
+    delay(150);
+    moveServoIncremental(BASE_MOTOR, homeBaseMotor, chessBoard[row][column][0]);
+    delay(150);
+    moveServoIncremental(CLAW_MOTOR, homeClawMotor, chessBoard[row][column][5]);
+    delay(150);
+
+    // move the arm down gently without hitting other pieces
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, 115, chessBoard[row][column][1]);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, 50, chessBoard[row][column][2]);
+    moveServoIncremental(ELBOW_MOTOR, 40, chessBoard[row][column][3]);
+    delay(150);
+
+    // close claw
+    moveServoIncremental(CLAW_MOTOR, chessBoard[row][column][5], homeClawMotor);
+    delay(150);
+
+    // move piece to collection bucket and move elbow upwards so no pieces are bumped
+    moveServoIncremental(ELBOW_MOTOR, chessBoard[row][column][3], 40);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, chessBoard[row][column][1], 135);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, chessBoard[row][column][2], 45);
+    delay(300);
+
+    moveServoIncremental(BASE_MOTOR, chessBoard[row][column][0], homeBaseMotor);
+    delay(150);
+
+    // position elbow, and wrist to be in position to drop a piece into the bin
+    moveServoIncremental(ELBOW_MOTOR, 40, homeElbowMotor);
+    delay(150);
+
+    // oepn claw
+    moveServoIncremental(CLAW_MOTOR, homeClawMotor, chessBoard[row][column][5]);
+    delay(150);
+    // close claw again
+    moveServoIncremental(CLAW_MOTOR, chessBoard[row][column][5], homeClawMotor);
+    delay(150);
+
+    moveServoIncremental(CLAW_WRIST, chessBoard[row][column][4], homeClawWristMotor);
+    delay(150);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, 135, homeLeftShoulderMotor);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, 45, homeRightShoulderMotor);
+    delay(300);
+
+    Serial.print("Base Motor Angle: ");
+    Serial.print(chessBoard[row][column][0]);
+    Serial.print(", Left Motor Angle: ");
+    Serial.print(chessBoard[row][column][1]);
+    Serial.print(", Right Motor Angle: ");
+    Serial.print(chessBoard[row][column][2]);
+    Serial.print(", Elbow Motor Angle: ");
+    Serial.print(chessBoard[row][column][3]);
+    Serial.print(", Claw Wrist Motor Angle: ");
+    Serial.print(chessBoard[row][column][4]);
+    Serial.print(", Claw Motor Angle: ");
+    Serial.print(chessBoard[row][column][5]);
+
+}
+
+// move to origin square
+void moveToSquare(char file, int rank) {
+
+    int column = file - 'a';
+    int row = 8 - rank;
+
+    if (column < 0 || column > 7 || row < 0 || row > 7) {
+        Serial.println("Invalid square.");
+        return;
+    }
+
+    Serial.print("Moving to: "); Serial.print(file); Serial.println(rank);
+
+
+    //moveServoIncremental(LEFT_SHOULDER_MOTOR, homeLeftShoulderMotor, chessBoard[row][column][1]);
+    //moveServoIncremental(RIGHT_SHOULDER_MOTOR, homeRightShoulderMotor, chessBoard[row][column][2]);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, homeLeftShoulderMotor, 115);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, homeRightShoulderMotor, 50);
+    delay(150);
+    //moveServoIncremental(ELBOW_MOTOR, homeElbowMotor, chessBoard[row][column][3]);
+    moveServoIncremental(ELBOW_MOTOR, homeElbowMotor, 40);
+    delay(150);
+    moveServoIncremental(CLAW_WRIST, homeClawWristMotor, chessBoard[row][column][4]);
+    delay(150);
+    moveServoIncremental(BASE_MOTOR, homeBaseMotor, chessBoard[row][column][0]);
+    delay(150);
+    moveServoIncremental(CLAW_MOTOR, homeClawMotor, chessBoard[row][column][5]);
+    delay(150);
+
+    // move the arm down gently without hitting other pieces
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, 115, chessBoard[row][column][1]);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, 50, chessBoard[row][column][2]);
+    moveServoIncremental(ELBOW_MOTOR, 40, chessBoard[row][column][3]);
+    delay(150);
+
+    Serial.print("Base Motor Angle: ");
+    Serial.print(chessBoard[row][column][0]);
+    Serial.print(", Left Motor Angle: ");
+    Serial.print(chessBoard[row][column][1]);
+    Serial.print(", Right Motor Angle: ");
+    Serial.print(chessBoard[row][column][2]);
+    Serial.print(", Elbow Motor Angle: ");
+    Serial.print(chessBoard[row][column][3]);
+    Serial.print(", Claw Wrist Motor Angle: ");
+    Serial.print(chessBoard[row][column][4]);
+    Serial.print(", Claw Motor Angle: ");
+    Serial.print(chessBoard[row][column][5]);
+
+    lastRow = row;
+    lastColumn = column;
+
+}
+
+// move to destination square
+void moveToSquare2(char file2, int rank2) {
+
+    int newColumn = file2 - 'a';
+    int newRow = 8 - rank2;
+
+    if (lastRow == -1 || lastColumn == -1) {
+        Serial.println("No previous move to return from.");
+        return;
+    }
+    if (newColumn < 0 || newColumn > 7 || newRow < 0 || newRow > 7) {
+        Serial.println("Invalid square.");
+        return;
+    }
+
+    Serial.print("Moving to: "); Serial.print(file2); Serial.println(rank2);
+    
+    //close claw
+    moveServoIncremental(CLAW_MOTOR, chessBoard[lastRow][lastColumn][5], homeClawMotor);
+    delay(150);
+
+    //move elbow upwards so no pieces are bumped
+    moveServoIncremental(ELBOW_MOTOR, chessBoard[lastRow][lastColumn][3], 40);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, chessBoard[lastRow][lastColumn][1], 135);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, chessBoard[lastRow][lastColumn][2], 45);
+    delay(300);
+    moveServoIncremental(BASE_MOTOR, chessBoard[lastRow][lastColumn][0], chessBoard[newRow][newColumn][0]);
+    delay(150);
+    moveServoIncremental(ELBOW_MOTOR, 40, chessBoard[newRow][newColumn][3]);
+    delay(150);
+    moveServoIncremental(CLAW_WRIST, chessBoard[lastRow][lastColumn][4], chessBoard[newRow][newColumn][4]);
+    delay(150);
+
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, 135, chessBoard[newRow][newColumn][1]);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, 45, chessBoard[newRow][newColumn][2]);
+
+    //re open the claw 
+    moveServoIncremental(CLAW_MOTOR, homeClawMotor, chessBoard[newRow][newColumn][5]);
+    delay(150);
+
+    Serial.print("Base Motor Angle: ");
+    Serial.print(chessBoard[newRow][newColumn][0]);
+    Serial.print(", Left Motor Angle: ");
+    Serial.print(chessBoard[newRow][newColumn][1]);
+    Serial.print(", Right Motor Angle: ");
+    Serial.print(chessBoard[newRow][newColumn][2]);
+    Serial.print(", Elbow Motor Angle: ");
+    Serial.print(chessBoard[newRow][newColumn][3]);
+    Serial.print(", Claw Wrist Motor Angle: ");
+    Serial.print(chessBoard[newRow][newColumn][4]);
+    Serial.print(", Claw Motor Angle: ");
+    Serial.print(chessBoard[newRow][newColumn][5]);
+
+    lastRow2 = newRow;
+    lastColumn2 = newColumn;
+
+}
+
+// return to defined home position
+void returnToHome() {
+
+    if (lastRow2 == -2 || lastColumn2 == -2) {
+        Serial.println("No previous move to return from.");
+        return;
+    }
+
+    Serial.println("\nReturning to home position...");
+
+    //move elbow upwards so no pieces are bumped
+    moveServoIncremental(ELBOW_MOTOR, chessBoard[lastRow2][lastColumn2][3], 40);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, chessBoard[lastRow2][lastColumn2][1], 135);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, chessBoard[lastRow2][lastColumn2][2], 45);
+    delay(300);
+    
+    //close claw 
+    moveServoIncremental(CLAW_MOTOR, chessBoard[lastRow2][lastColumn2][5], homeClawMotor);
+    delay(150);
+    moveServoIncremental(BASE_MOTOR, chessBoard[lastRow2][lastColumn2][0], homeBaseMotor);
+    delay(150);
+    moveServoIncremental(ELBOW_MOTOR, 40, homeElbowMotor);
+    delay(150);
+    moveServoIncremental(CLAW_WRIST, chessBoard[lastRow2][lastColumn2][4], homeClawWristMotor);
+    delay(150);
+    moveServoIncremental(LEFT_SHOULDER_MOTOR, 135, homeLeftShoulderMotor);
+    moveServoIncremental(RIGHT_SHOULDER_MOTOR, 45, homeRightShoulderMotor);
+
+    Serial.print("Base Motor Angle: ");
+    Serial.print(homeBaseMotor);
+    Serial.print(", Left Motor Angle: ");
+    Serial.print(homeLeftShoulderMotor);
+    Serial.print(", Right Motor Angle: ");
+    Serial.print(homeRightShoulderMotor);
+    Serial.print(", Elbow Motor Angle: ");
+    Serial.print(homeElbowMotor);
+    Serial.print(", Claw Wrist Motor Angle: ");
+    Serial.print(homeClawWristMotor);
+    Serial.print(", Claw Motor Angle: ");
+    Serial.print(homeClawMotor);
+
+    Serial.println("\nHome position reached.");
+}
+
+void setup() {
+
+    Serial.begin(9600);
+    pwm.begin();
+    pwm.setPWMFreq(50);
+
+    Serial.println("Initializing servos...");
+
+    delay(1000);
+    returnToHome();
+
+}
+
+void loop() {
+
+    // Stockfish sending moves
+    if (Serial.available() > 0) {
+
+        String input = Serial.readStringUntil('\n');  // Read until newline
+
+        if (input.endsWith("k")) {
+            isCapture = true;
+        }
+
+        // queenside castle
+        if (input == "e8c8") {
+            isQueenSideCastle = true;
+        }
+
+        // kingside caslt
+        if (input == "e8g8") {
+            isKingSideCastle = true;
+        }
+
+        char file = input.charAt(0);         // Get 'e'
+        int rank = input.charAt(1) - '0';    // Get '2'
+        char file2 = input.charAt(2);        // Get 'e'  
+        int rank2 = input.charAt(3) - '0';   // Get '4'               
+
+        Serial.print("ORIGIN SQUARE LETTER: " + file);
+        Serial.print("ORIGIN SQUARE NUMBER: " + rank);
+        Serial.print("DEST SQUARE LETTER: " + file2);
+        Serial.print("DEST SQUARE NUMBER: " + rank2);
+
+        // regular move
+        if (isCapture == false && isQueenSideCastle == false && isKingSideCastle == false) {
+
+            if (file >= 'a' && file <= 'h' && rank >= 1 && rank <= 8 && file2 >= 'a' && file2 <= 'h' && rank2 >= 1 && rank2 <= 8) {
+                moveToSquare(file, rank);
+                delay(2000);
+                Serial.println("First Move completed");
+                delay(2000);
+                moveToSquare2(file2, rank2);
+                delay(2000);
+                Serial.println("Second Move completed");
+                delay(2000);
+                returnToHome();
+
+            } else {
+                Serial.println("Invalid square.");
+            }
+        }
+
+        // Take a piece
+        if (isCapture == true) {
+       
+            takePiece(file2, rank2);
+            delay(2000);
+            Serial.println("Piece Taken");
+            moveToSquare(file, rank);
+            delay(2000);
+            Serial.println("First Move complete");
+            moveToSquare2(file2, rank2);
+            delay(2000);
+            Serial.println("Second Move complete");
+            delay(2000);
+            returnToHome();
+
+            isCapture = false;
+
+        }
+
+        // Queenside castle logic
+        if (isQueenSideCastle == true) {
+                    
+            moveToSquare(file, rank);
+            delay(2000);
+            Serial.println("First Move complete");
+            moveToSquare2(file2, rank2);
+            delay(2000);
+            Serial.println("Second Move complete");
+            delay(2000);
+            returnToHome();
+
+            Serial.println("Castling Queen side...");
+            moveToSquare('a', 8);
+            delay(2000);
+            Serial.println("First Move complete");
+            moveToSquare2('d', 8);
+            delay(2000);
+            Serial.println("Second Move complete");
+            delay(2000);
+            returnToHome();
+
+            isQueenSideCastle = false;
+
+        }
+
+        // Kingside castle logic
+        if (isKingSideCastle == true) {
+
+            moveToSquare(file, rank);
+            delay(2000);
+            Serial.println("First Move complete");
+            moveToSquare2(file2, rank2);
+            delay(2000);
+            Serial.println("Second Move complete");
+            delay(2000);
+            returnToHome();
+
+            Serial.println("Castling King side...");
+            moveToSquare('h', 8);
+            delay(2000);
+            Serial.println("First Move complete");
+            moveToSquare2('f', 8);
+            delay(2000);
+            Serial.println("Second Move complete");
+            delay(2000);
+            returnToHome();
+
+            isKingSideCastle = false;
+
+        }
+
+        Serial.println("Received:" + input);        // Echo full message
+
+    }
+    
+}
