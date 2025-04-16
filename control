@@ -1,3 +1,5 @@
+/** ARDUINO PROGRAM USING A PCA9865 MOTOR DRIVER **/
+
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
