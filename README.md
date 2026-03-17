@@ -30,8 +30,3 @@ showcased in this repo. Below is a list of all the hardware/software components 
 
 This link will show you how to download Stockfish onto your local machine: https://stockfishchess.org/download/
 Just pick your OS and follow the installation steps as required.
-
-
-### Reference-
-
-<img width="919" height="607" alt="image" src="https://github.com/user-attachments/assets/bd32a0e4-6d4b-47f7-8b15-58ccd2db5328" />
